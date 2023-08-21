@@ -1,31 +1,34 @@
 from os import environ
 import json
 from time import time, sleep
+from datetime import timedelta, datetime
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
-from sqlalchemy import MetaData, Table
+from sqlalchemy import MetaData, Table, and_
 from sqlalchemy.orm import sessionmaker
 import pandas as pd
 from geopy import distance
-
-from faker import Faker
-faker = Faker()
-
+import schedule
+# from faker import Faker
+# faker = Faker()
 
 
 print('Waiting for the data generator...')
 print('ETL Starting...')
 
-while True:
-    try:
-        psql_engine = create_engine(environ["POSTGRESQL_CS"], pool_pre_ping=True, pool_size=10)
-        break
-    except OperationalError:
-        sleep(0.1)
+def create_psql_engine():
+    while True:
+        try:
+            psql_engine = create_engine(environ["POSTGRESQL_CS"], pool_pre_ping=True, pool_size=10)
+            break
+        except OperationalError:
+            sleep(0.1)
 
-print('Connection to PostgresSQL successful.')
+    print('Connection to PostgresSQL successful.')
+    return psql_engine
 
-# Write the solution here
+#Write the solution here
+
 
 def create_mysql_engine():
     while True:
@@ -41,45 +44,47 @@ def create_mysql_engine():
 # read from postgres
 
 
-def read_from_postgres(psql_engine):
+def read_from_postgres(psql_engine, start_ts, last_ts):
     metadata = MetaData()
     devices_table = Table('devices', metadata, autoload_with=psql_engine)
 
     Session = sessionmaker(bind=psql_engine)
     session = Session()
-    query = session.query(devices_table).limit(5)
+    query = session.query(devices_table).filter(and_(devices_table.c.time > str(int(start_ts)), devices_table.c.time < str(int(last_ts))))
     print('reading data from postgres')
     sleep(2)
     result = query.all()
 
     if len(result):
         df = pd.DataFrame(result)
+        df['start_ts'] = start_ts
+        df['last_ts'] = last_ts
     else:
         print("no records yet")
-
+        df = None
     session.close()
 
-def create_data():
-    data = []
-    for i in range(100):
-        data.append(
-            {
-                'device_id':str(faker.random_int(14544524545645245, 14544524545645252)),
-                'temperature':faker.random_int(10, 50),
-                'location':dict(latitude=str(faker.latitude()), longitude=str(faker.longitude())),
-                'time':str(int(time())+faker.random_int(-50, 50))
-            }
-        )
-
-
-    return data
-
-def create_df(data):
-    df = pd.DataFrame(data)
     return df
+
+# def create_data():
+#     data = []
+#     for i in range(100):
+#         data.append(
+#             {
+#                 'device_id':str(faker.random_int(14544524545645245, 14544524545645252)),
+#                 'temperature':faker.random_int(10, 50),
+#                 'location':dict(latitude=str(faker.latitude()), longitude=str(faker.longitude())),
+#                 'time':str(int(time())+faker.random_int(-50, 50))
+#             }
+#         )
+
+
+    # return data
 
 def calculate_max_temp(df):
     max_temps = df.groupby('device_id')['temperature'].max().reset_index()
+    max_temps.columns = ['device_id','max_temperature']
+
     return max_temps
 
 def calculate_number_of_data_points(df):
@@ -110,7 +115,6 @@ def collect_data_points(list_of_data_points):
 
     return tuple_list
 
-
 def calculate_total_distance(coords_list):
     total_distance = 0
     for i in range(len(coords_list)-1):
@@ -137,25 +141,40 @@ def calculate_total_distances(data_points_max_temps_df, df):
 
 def save_data(df, engine):
     table_name = 'devices_info'
-    devices.to_sql(table_name, con=engine, if_exists='append', index=False)
+    df.to_sql(table_name, con=engine, if_exists='append', index=False)
 
 def read_data(engine):
     table_name = 'devices_info'
     sql_query = f'select * from {table_name}'
     table_info = pd.read_sql(sql_query, con=engine)
+
     print(table_info)
 
+
 def run():
-    data = create_data()
-    df = create_df(data)
-    max_temps = calculate_max_temp(df)
-    data_points_max_temps_df = calculate_number_of_data_points(df)
-    merged_df = merge_dfs(data_points_max_temps_df,max_temps)
-    final_df = calculate_total_distances(data_points_max_temps_df,df)
+    #data = create_data()
+    
+    current_date = datetime.now()
+    start_date = current_date - timedelta(hours=1)
+    current_ts = current_date.timestamp()
+    timestamp_one_hour_ago = start_date.timestamp()
+    print("current ts: %d"%current_ts)
+    print("start ts: %d"%timestamp_one_hour_ago)
+    psql_engine = create_psql_engine()
+    df = read_from_postgres(psql_engine,timestamp_one_hour_ago, current_ts)
+    if df:
+        print(df)
+        max_temps = calculate_max_temp(df)
+        data_points_max_temps_df = calculate_number_of_data_points(df)
+        merged_df = merge_dfs(data_points_max_temps_df,max_temps)
+        final_df = calculate_total_distances(merged_df,df)
 
-    #mysql_engine = create_mysql_engine()
-    #save_data(final_df,mysql_engine)
-    #read_data(mysql_engine)
-
-
-run()
+        mysql_engine = create_mysql_engine()
+        save_data(final_df,mysql_engine)
+        read_data(mysql_engine)
+    else:
+        print("no data yet")
+    print('-----')
+schedule.every().minute.at(":28").do(run)
+while True:
+    schedule.run_pending()
