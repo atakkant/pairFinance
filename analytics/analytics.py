@@ -9,9 +9,6 @@ from sqlalchemy.orm import sessionmaker
 import pandas as pd
 from geopy import distance
 import schedule
-# from faker import Faker
-# faker = Faker()
-
 
 print('Waiting for the data generator...')
 print('ETL Starting...')
@@ -66,20 +63,6 @@ def read_from_postgres(psql_engine, start_ts, last_ts):
 
     return df
 
-# def create_data():
-#     data = []
-#     for i in range(100):
-#         data.append(
-#             {
-#                 'device_id':str(faker.random_int(14544524545645245, 14544524545645252)),
-#                 'temperature':faker.random_int(10, 50),
-#                 'location':dict(latitude=str(faker.latitude()), longitude=str(faker.longitude())),
-#                 'time':str(int(time())+faker.random_int(-50, 50))
-#             }
-#         )
-
-
-    # return data
 
 def calculate_max_temp(df):
     max_temps = df.groupby('device_id')['temperature'].max().reset_index()
@@ -152,8 +135,7 @@ def read_data(engine):
 
 
 def run():
-    #data = create_data()
-    
+
     current_date = datetime.now()
     start_date = current_date - timedelta(hours=1)
     current_ts = current_date.timestamp()
@@ -175,6 +157,6 @@ def run():
     else:
         print("no data yet")
     print('-----')
-schedule.every().minute.at(":28").do(run)
+schedule.every().hour.at(":01").do(run)
 while True:
     schedule.run_pending()
