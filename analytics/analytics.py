@@ -162,6 +162,6 @@ def run():
     else:
         print("no data yet")
     print('-----')
-schedule.every().minute.at(":01").do(run)
+schedule.every().hour.at(":01").do(run)
 while True:
     schedule.run_pending()
