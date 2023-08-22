@@ -5,6 +5,7 @@ from time import time, sleep
 from faker import Faker
 from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import Table, Column, Integer, String, MetaData
 
 faker = Faker()
@@ -26,18 +27,23 @@ while True:
 
 
 async def store_data_point(device_id):
-    ins = devices.insert()
-    with psql_engine.connect() as conn:
-        while True:
-            data = dict(
-                device_id=device_id,
-                temperature=faker.random_int(10, 50),
-                location=json.dumps(dict(latitude=str(faker.latitude()), longitude=str(faker.longitude()))),
-                time=str(int(time()))
-            )
-            conn.execute(ins, data)
-            print(device_id, data['time'])
-            await asyncio.sleep(1.0)
+    
+    metadata = MetaData()
+    while True:
+        data = dict(
+            device_id=device_id,
+            temperature=faker.random_int(10, 50),
+            location=json.dumps(dict(latitude=str(faker.latitude()), longitude=str(faker.longitude()))),
+            time=str(int(time()))
+        )
+        Session = sessionmaker(bind=psql_engine)
+        new_data_insert = devices.insert().values(data)
+        session = Session()
+        session.execute(new_data_insert)
+        session.commit()
+        print(device_id, data['time'])
+        await asyncio.sleep(1.0)
+        session.close()
 
 
 loop = asyncio.get_event_loop()

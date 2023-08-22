@@ -54,8 +54,8 @@ def read_from_postgres(psql_engine, start_ts, last_ts):
 
     if len(result):
         df = pd.DataFrame(result)
-        df['start_ts'] = start_ts
-        df['last_ts'] = last_ts
+        df['start_ts'] = str(int(start_ts))
+        df['last_ts'] = str(int(last_ts))
     else:
         print("no records yet")
         df = None
@@ -65,8 +65,8 @@ def read_from_postgres(psql_engine, start_ts, last_ts):
 
 
 def calculate_max_temp(df):
-    max_temps = df.groupby('device_id')['temperature'].max().reset_index()
-    max_temps.columns = ['device_id','max_temperature']
+    max_temps = df.groupby(['device_id', 'start_ts', 'last_ts'])['temperature'].max().reset_index()
+    max_temps.columns = ['device_id', 'start_ts', 'last_ts','max_temperature']
 
     return max_temps
 
@@ -85,7 +85,11 @@ def merge_dfs(number_of_data_points, max_temps):
 # total distance of device movement for every device per hours
 
 def calculate_distance(point1, point2):
-    some_distance = distance.distance(point1,point2).km
+    try:
+        some_distance = distance.distance(point1,point2).km
+    except Exception as e:
+        print(e)
+        some_distance = 0
     return some_distance
 
 def convert_to_tuple(dict_object):
@@ -94,7 +98,7 @@ def convert_to_tuple(dict_object):
 def collect_data_points(list_of_data_points):
     tuple_list = []
     for point in list_of_data_points:
-        tuple_list.append(convert_to_tuple(point))
+        tuple_list.append(convert_to_tuple(json.loads(point)))
 
     return tuple_list
 
@@ -114,6 +118,7 @@ def calculate_total_distances(data_points_max_temps_df, df):
     for device_id, _ in grouped:
         coord_list = df[df['device_id'] == device_id]['location'].tolist()
         list_of_coords = collect_data_points(coord_list)
+
         total_distance = calculate_total_distance(list_of_coords)
         print("total distance of %s is %d"%(device_id, total_distance))
         data_points_max_temps_df.loc[data_points_max_temps_df['device_id'] == device_id, 'total_distance'] = total_distance
@@ -144,7 +149,7 @@ def run():
     print("start ts: %d"%timestamp_one_hour_ago)
     psql_engine = create_psql_engine()
     df = read_from_postgres(psql_engine,timestamp_one_hour_ago, current_ts)
-    if df:
+    if not df.empty:
         print(df)
         max_temps = calculate_max_temp(df)
         data_points_max_temps_df = calculate_number_of_data_points(df)
@@ -157,6 +162,6 @@ def run():
     else:
         print("no data yet")
     print('-----')
-schedule.every().hour.at(":01").do(run)
+schedule.every().minute.at(":01").do(run)
 while True:
     schedule.run_pending()
